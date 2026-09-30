@@ -1,0 +1,559 @@
+// ---------------------------------------------------------------------------
+// SMART-ELIMU — Schéma de données
+// ---------------------------------------------------------------------------
+// Plateforme congolaise d'éducation :
+//   1. Formation certifiante en ligne (SMART-ELIMU Academy)
+//   2. Gestion d'établissement scolaire (SMART-ELIMU School)
+//   3. Orientation scolaire & académique (SMART-ELIMU Pathways)
+//   4. Réseau de partenaires (universités & centres de formation agréés)
+//
+// NOTE : SQLite ne supporte pas les enums Prisma → les colonnes catégorielles
+// sont des String, validées côté application (src/lib/constants.ts).
+// NOTE : les structures JSON sont stockées en String et (dé)sérialisées via
+// les helpers de src/lib/json.ts.
+// ---------------------------------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ===========================================================================
+// 1. UTILISATEURS & SESSIONS
+// ===========================================================================
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String   @default("LEARNER") // LEARNER | TEACHER | SCHOOL_ADMIN | PARTNER | ADMIN
+  phone        String?
+  city         String?
+  province     String?
+  country      String   @default("RDC")
+  locale       String   @default("fr")
+  headline     String?
+  avatarColor  String   @default("#1c60f0")
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions        Session[]
+  enrollments     Enrollment[]
+  certificates    Certificate[]
+  quizAttempts    QuizAttempt[]
+  orientation     OrientationResult[]
+  schools         School[]            @relation("SchoolOwner")
+  payments        Payment[]           @relation("PaymentRecorder")
+  applications    ProgramApplication[]
+  partnerRequests PartnershipRequest[] @relation("PartnerRequestReviewer")
+  taughtCourses   Course[]            @relation("CourseInstructor")
+  teacherProfile  Teacher?
+
+  @@index([role])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  userAgent String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ===========================================================================
+// 2. RÉSEAU DE PARTENAIRES (universités & centres de formation agréés)
+// ===========================================================================
+
+model Partner {
+  id           String   @id @default(cuid())
+  name         String
+  slug         String   @unique
+  type         String   @default("UNIVERSITY") // UNIVERSITY | TRAINING_CENTER | INSTITUTE | HIGH_SCHOOL
+  city         String
+  province     String
+  country      String   @default("RDC")
+  logoEmoji    String   @default("🎓")
+  coverColor   String   @default("#1c60f0")
+  description  String
+  website      String?
+  email        String?
+  phone        String?
+  accreditation String? // Numéro d'agrément (Ministère de l'ESU / Ministère de la Formation professionnelle)
+  status       String   @default("ACTIVE") // PENDING | ACTIVE | SUSPENDED
+  foundedYear  Int?
+  studentsCount Int?
+  isFeatured   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  programs      Program[]
+  courses       Course[]
+  scholarships  Scholarship[]
+  certificates  Certificate[]
+  applications  ProgramApplication[]
+
+  @@index([type])
+  @@index([province])
+}
+
+/// Filière / programme académique proposé par un partenaire
+model Program {
+  id            String   @id @default(cuid())
+  partnerId     String
+  name          String
+  field         String   // Informatique, Santé, Droit, Génie civil...
+  degree        String   // LICENCE | MASTER | DOCTORAT | BTS | CERTIFICAT | A1/A2...
+  durationMonths Int
+  language      String   @default("fr")
+  tuitionUsd    Int?
+  requirements  String
+  description   String
+  careers       String   // liste séparée par des "|"
+  pathwayTags   String   // codes de profil d'orientation compatibles, séparés par "|"
+  isFeatured    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  partner      Partner              @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  applications ProgramApplication[]
+
+  @@index([partnerId])
+  @@index([field])
+}
+
+model Scholarship {
+  id          String   @id @default(cuid())
+  partnerId   String?
+  title       String
+  organization String
+  level       String   // SECONDAIRE | LICENCE | MASTER | FORMATION_PRO
+  amountUsd   Int?
+  deadline    DateTime
+  description String
+  eligibility String
+  url         String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  partner Partner? @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+
+  @@index([deadline])
+}
+
+model ProgramApplication {
+  id          String   @id @default(cuid())
+  programId   String
+  partnerId   String
+  userId      String?
+  fullName    String
+  email       String
+  phone       String?
+  city        String?
+  message     String?
+  status      String   @default("SUBMITTED") // SUBMITTED | REVIEWING | ACCEPTED | REJECTED | ENROLLED
+  createdAt   DateTime @default(now())
+
+  program Program @relation(fields: [programId], references: [id], onDelete: Cascade)
+  partner Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+}
+
+model PartnershipRequest {
+  id            String   @id @default(cuid())
+  organizationName String
+  organizationType String
+  contactName   String
+  email         String
+  phone         String?
+  city          String?
+  province      String?
+  message       String?
+  status        String   @default("NEW") // NEW | CONTACTED | APPROVED | REJECTED
+  reviewedById  String?
+  createdAt     DateTime @default(now())
+
+  reviewedBy User? @relation("PartnerRequestReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([status])
+}
+
+// ===========================================================================
+// 3. FORMATION CERTIFIANTE EN LIGNE
+// ===========================================================================
+
+model Course {
+  id             String   @id @default(cuid())
+  title          String
+  slug           String   @unique
+  summary        String
+  description    String
+  category       String
+  level          String   @default("DEBUTANT") // DEBUTANT | INTERMEDIAIRE | AVANCE
+  language       String   @default("fr")
+  durationHours  Int      @default(20)
+  priceUsd       Int      @default(0)
+  priceCdf       Int      @default(0)
+  isCertifying   Boolean  @default(true)
+  certificateTitle String?
+  coverEmoji     String   @default("📘")
+  coverColor     String   @default("#1c60f0")
+  partnerId      String?
+  instructorId   String?
+  status         String   @default("PUBLISHED") // DRAFT | PUBLISHED | ARCHIVED
+  rating         Float    @default(4.7)
+  learnersCount  Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  partner     Partner?         @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  instructor  User?            @relation("CourseInstructor", fields: [instructorId], references: [id], onDelete: SetNull)
+  modules     CourseModule[]
+  quizzes     Quiz[]
+  enrollments Enrollment[]
+  certificates Certificate[]
+
+  @@index([category])
+  @@index([status])
+}
+
+model CourseModule {
+  id       String @id @default(cuid())
+  courseId String
+  title    String
+  summary  String?
+  position Int    @default(0)
+
+  course  Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessons Lesson[]
+
+  @@index([courseId])
+}
+
+model Lesson {
+  id          String @id @default(cuid())
+  moduleId    String
+  title       String
+  type        String @default("TEXTE") // TEXTE | VIDEO | ATELIER | QUIZ
+  durationMin Int    @default(12)
+  content     String @default("")
+  videoUrl    String?
+  resourceUrl String?
+  position    Int    @default(0)
+
+  module   CourseModule    @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  progress LessonProgress[]
+
+  @@index([moduleId])
+}
+
+model Quiz {
+  id           String @id @default(cuid())
+  courseId     String
+  title        String
+  description  String?
+  passingScore Int    @default(70) // pourcentage
+  position     Int    @default(0)
+
+  course    Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  questions QuizQuestion[]
+  attempts  QuizAttempt[]
+
+  @@index([courseId])
+}
+
+model QuizQuestion {
+  id           String @id @default(cuid())
+  quizId       String
+  prompt       String
+  choicesJson  String // ["choix A","choix B",...]
+  correctIndex Int
+  explanation  String?
+  points       Int    @default(1)
+  position     Int    @default(0)
+
+  quiz Quiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  @@index([quizId])
+}
+
+model Enrollment {
+  id           String    @id @default(cuid())
+  userId       String
+  courseId     String
+  status       String    @default("ACTIVE") // ACTIVE | COMPLETED | ABANDONED
+  progressPct  Int       @default(0)
+  finalScore   Int?
+  enrolledAt   DateTime  @default(now())
+  completedAt  DateTime?
+
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course        Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessonProgress LessonProgress[]
+
+  @@unique([userId, courseId])
+  @@index([courseId])
+}
+
+model LessonProgress {
+  id           String   @id @default(cuid())
+  enrollmentId String
+  lessonId     String
+  completedAt  DateTime @default(now())
+
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  lesson     Lesson     @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([enrollmentId, lessonId])
+}
+
+model QuizAttempt {
+  id          String   @id @default(cuid())
+  userId      String
+  quizId      String
+  score       Int
+  passed      Boolean
+  answersJson String
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quiz Quiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Certificate {
+  id           String   @id @default(cuid())
+  code         String   @unique // ex. SE-2026-4F8A-2K19 — utilisé pour la vérification publique
+  userId       String
+  courseId     String
+  partnerId    String?
+  title        String
+  holderName   String
+  grade        String   @default("Satisfaisant") // Excellent | Très bien | Bien | Satisfaisant
+  score        Int      @default(0)
+  hours       Int      @default(0)
+  issuedAt     DateTime @default(now())
+  expiresAt    DateTime?
+  revoked      Boolean  @default(false)
+  revokeReason String?
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course  Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  partner Partner? @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+}
+
+// ===========================================================================
+// 4. ORIENTATION SCOLAIRE & ACADÉMIQUE
+// ===========================================================================
+
+model OrientationResult {
+  id             String   @id @default(cuid())
+  userId         String?
+  shareCode      String   @unique
+  respondentName String
+  respondentEmail String?
+  educationLevel String // SECONDAIRE | DIPLOME_ETAT | LICENCE | AUTRE
+  scoresJson     String   // { investigative: 12, realistic: 8, ... }
+  profileCode    String   // ex. "IRC"
+  profileLabel   String
+  topFieldsJson  String   // ["Informatique","Santé",...]
+  recommendedProgramIdsJson String
+  answersJson    String
+  createdAt      DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([profileCode])
+}
+
+// ===========================================================================
+// 5. GESTION D'ÉTABLISSEMENT SCOLAIRE
+// ===========================================================================
+
+model School {
+  id           String   @id @default(cuid())
+  name         String
+  code         String   @unique // ex. "EP-NDK-0147"
+  type         String   @default("MIXTE") // PRIMAIRE | SECONDAIRE | MIXTE | TECHNIQUE
+  city         String
+  province     String
+  address      String?
+  phone        String?
+  email        String?
+  directorName String
+  motto        String?
+  logoEmoji    String   @default("🏫")
+  coverColor   String   @default("#0d2a6b")
+  academicYear String   @default("2025-2026")
+  capacity     Int      @default(600)
+  ownerId      String?
+  createdAt    DateTime @default(now())
+
+  owner        User?         @relation("SchoolOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  classes      SchoolClass[]
+  students     Student[]
+  teachers     Teacher[]
+  attendances  Attendance[]
+  grades       Grade[]
+  invoices     Invoice[]
+
+  @@index([province])
+}
+
+model SchoolClass {
+  id           String @id @default(cuid())
+  schoolId     String
+  name         String // "6ème Commerciale A"
+  level        String // "1ère année secondaire"
+  section      String? // Scientifique, Commerciale, Pédagogique...
+  academicYear String @default("2025-2026")
+  capacity     Int    @default(45)
+  room         String?
+  mainTeacherId String?
+
+  school    School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  mainTeacher Teacher? @relation("ClassMainTeacher", fields: [mainTeacherId], references: [id], onDelete: SetNull)
+  students  Student[]
+  attendances Attendance[]
+  grades    Grade[]
+
+  @@index([schoolId])
+}
+
+model Teacher {
+  id           String   @id @default(cuid())
+  schoolId     String
+  userId       String?  @unique
+  firstName    String
+  lastName     String
+  gender       String   @default("M")
+  email        String?
+  phone        String?
+  subject      String
+  qualification String?
+  contractType String   @default("PERMANENT") // PERMANENT | VACATAIRE | STAGIAIRE
+  hiredAt      DateTime @default(now())
+  isActive     Boolean  @default(true)
+
+  school      School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  user        User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  mainClasses SchoolClass[] @relation("ClassMainTeacher")
+
+  @@index([schoolId])
+}
+
+model Student {
+  id            String   @id @default(cuid())
+  schoolId      String
+  classId       String?
+  matricule     String
+  firstName     String
+  lastName      String
+  gender        String   @default("M") // M | F
+  birthDate     DateTime?
+  placeOfBirth  String?
+  guardianName  String?
+  guardianPhone String?
+  guardianRelation String?
+  address       String?
+  enrolledAt    DateTime @default(now())
+  status        String   @default("ACTIF") // ACTIF | TRANSFERE | ABANDON | DIPLOME
+  photoEmoji    String   @default("🧑🏾‍🎓")
+
+  school      School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  class       SchoolClass? @relation(fields: [classId], references: [id], onDelete: SetNull)
+  attendances Attendance[]
+  grades      Grade[]
+  invoices    Invoice[]
+
+  @@unique([schoolId, matricule])
+  @@index([classId])
+}
+
+model Attendance {
+  id        String   @id @default(cuid())
+  schoolId  String
+  studentId String
+  classId   String?
+  date      DateTime
+  status    String   @default("PRESENT") // PRESENT | ABSENT | RETARD | EXCUSE
+  note      String?
+  createdAt DateTime @default(now())
+
+  school  School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  class   SchoolClass? @relation(fields: [classId], references: [id], onDelete: SetNull)
+
+  @@unique([studentId, date])
+  @@index([schoolId, date])
+}
+
+model Grade {
+  id          String   @id @default(cuid())
+  schoolId    String
+  studentId   String
+  classId     String?
+  subject     String
+  period      String   // T1 | T2 | T3 | EXETAT
+  score       Float
+  maxScore    Float    @default(100)
+  coefficient Int      @default(1)
+  teacherName String?
+  comment     String?
+  createdAt   DateTime @default(now())
+
+  school  School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  class   SchoolClass? @relation(fields: [classId], references: [id], onDelete: SetNull)
+
+  @@index([studentId, period])
+  @@index([schoolId, period])
+}
+
+model Invoice {
+  id          String   @id @default(cuid())
+  schoolId    String
+  studentId   String
+  label       String   // "Frais scolaires — Trimestre 1"
+  period      String   @default("T1")
+  amount      Float
+  currency    String   @default("CDF") // CDF | USD
+  dueDate     DateTime
+  status      String   @default("IMPAYE") // IMPAYE | PARTIEL | PAYE | ANNULE
+  createdAt   DateTime @default(now())
+
+  school   School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student  Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  payments Payment[]
+
+  @@index([schoolId])
+  @@index([studentId])
+}
+
+model Payment {
+  id        String   @id @default(cuid())
+  invoiceId String
+  amount    Float
+  currency  String   @default("CDF")
+  method    String   @default("MOBILE_MONEY") // MOBILE_MONEY | ESPECES | VIREMENT | BANQUE
+  reference String?
+  paidAt    DateTime @default(now())
+  recordedById String?
+
+  invoice    Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  recordedBy User?   @relation("PaymentRecorder", fields: [recordedById], references: [id], onDelete: SetNull)
+
+  @@index([invoiceId])
+}

@@ -1,0 +1,44 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+
+# production
+/build
+
+# database (SQLite locale — régénérée via `npm run db:setup`)
+data/*.db
+data/*.db-wal
+data/*.db-shm
+prisma/dev.db
+prisma/dev.db-journal
+prisma/*.db
+prisma/*.db-journal
+
+# misc
+.DS_Store
+*.pem
+.vercel
+*.tsbuildinfo
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# env
+.env
+.env*.local
+
+# editors
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+# tests / caches
+/coverage
