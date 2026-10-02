@@ -22,7 +22,12 @@ import { randomBytes } from 'node:crypto';
 // Connexion
 // ---------------------------------------------------------------------------
 
-const DATA_DIR = process.env.ELIMU_DATA_DIR ?? path.join(process.cwd(), 'data');
+// Sur Netlify / AWS Lambda, seul /tmp est inscriptible : la base de démonstration
+// embarquée au build (data/smart-elimu.db) y est copiée au premier appel.
+const IS_SERVERLESS = Boolean(process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const BUNDLED_DB = path.join(process.cwd(), 'data', 'smart-elimu.db');
+const DATA_DIR =
+  process.env.ELIMU_DATA_DIR ?? (IS_SERVERLESS ? '/tmp/elimu' : path.join(process.cwd(), 'data'));
 const DB_FILE = process.env.DATABASE_FILE ?? path.join(DATA_DIR, 'smart-elimu.db');
 const SCHEMA_FILE = path.join(process.cwd(), 'db', 'schema.sql');
 
@@ -99,6 +104,10 @@ export function getDb(): Database.Database {
 
   // SQLite ne crée pas les dossiers manquants : on s'en assure avant l'ouverture.
   fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
+
+  if (IS_SERVERLESS && !fs.existsSync(DB_FILE) && fs.existsSync(BUNDLED_DB)) {
+    fs.copyFileSync(BUNDLED_DB, DB_FILE);
+  }
 
   const db = new Database(DB_FILE);
   db.pragma('journal_mode = WAL');
