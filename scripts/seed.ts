@@ -1031,7 +1031,15 @@ function seedRequestsAndApplications(users: UserMap, partners: PartnerMap) {
   });
 }
 
-main().catch((error) => {
+main()
+  .then(() => {
+    // Fusionne le journal WAL dans le fichier principal : la base peut ainsi être
+    // copiée/embarquée telle quelle (déploiement Netlify).
+    const db = getDb();
+    db.pragma('wal_checkpoint(TRUNCATE)');
+    db.close();
+  })
+  .catch((error) => {
   console.error('❌ Échec du peuplement :', error);
   process.exit(1);
 });

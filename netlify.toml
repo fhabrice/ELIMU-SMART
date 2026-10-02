@@ -1,0 +1,10 @@
+[build]
+  command = "npm run db:setup && npm run build"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# La base SQLite de démonstration est générée au build puis embarquée dans la
+# fonction serveur (copiée vers /tmp au démarrage, voir src/lib/sqlite.ts).
+[functions]
+  included_files = ["data/smart-elimu.db", "db/schema.sql", "node_modules/better-sqlite3/**"]
